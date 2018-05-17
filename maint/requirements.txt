@@ -1,0 +1,4 @@
+m2crypto
+pytest
+mock
+git+https://github.com/chaen/tornado.git@iostreamConfigurable
