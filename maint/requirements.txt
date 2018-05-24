@@ -1,4 +1,6 @@
-m2crypto
+#m2crypto
+/home/chaen/dirac/tornadoM2Crypto/m2crypto/
 pytest
 mock
-git+https://github.com/chaen/tornado.git@iostreamConfigurable
+#git+https://github.com/chaen/tornado.git@iostreamConfigurable
+/home/chaen/dirac/tornadoM2Crypto/tornado/
