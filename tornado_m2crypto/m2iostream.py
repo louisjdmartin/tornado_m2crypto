@@ -44,6 +44,7 @@ class M2IOStream(SSLIOStream):
         """
         self._ssl_options = kwargs.pop('ssl_options', _client_m2_ssl_defaults)
         IOStream.__init__(self, *args, **kwargs)
+        self._done_setup = False
         self._ssl_accepting = True
         self._handshake_reading = False
         self._handshake_writing = False
@@ -137,43 +138,43 @@ class M2IOStream(SSLIOStream):
     @printDebug
     def _do_ssl_handshake(self):
         # Based on code from test_ssl.py in the python stdlib
-        import traceback
-
-        print "CHRIS TRACEBACK"
-        for line in traceback.format_stack():
-          print(line.strip())
-        print "====="
+        #import traceback
+        #print "CHRIS TRACEBACK"
+        #for line in traceback.format_stack():
+        #  print(line.strip())
+        #print "====="
+        print ">> SOCKET TYPE: %s" % type(self.socket)
         try:
             self._handshake_reading = False
             self._handshake_writing = False
             print "CHRIS DOING HANDSHAKE %s"%self.socket.server_side
-            self.socket.setup_ssl()
-            self.socket.setblocking(1)
+            if not self._done_setup:
+                self.socket.setup_ssl()
+                if self.socket.server_side:
+                    self.socket.set_accept_state()
+                else:
+                    self.socket.set_connect_state()
+                self._done_setup = True
+            # Actual accept/connect logic
             if self.socket.server_side:
-              self.socket.set_accept_state()
               res = self.socket.accept_ssl()
             else:
-              self.socket.set_connect_state()
               res = self.socket.connect_ssl()
-            self.socket.setblocking(0) # Hack, should set it back to previous state...
             print "Chris accept_ssl ok %s"%res
-            err_num = self.socket.ssl_get_error(res)
-            if res <= 0:
+            if res == 0:
+                # TODO: We should somehow get SSL_WANT_READ/WRITE here
+                #       and then set the correct flag, although it does
+                #       work as long as one of them gets set
+                self._handshake_reading = True
+                self._handshake_writing = True
+                return
+            if res < 0:
+                err_num = self.socket.ssl_get_error(res)
                 print "Err: %s" % err_num
                 print "Err Str: %s" % Err.get_error_reason(err_num)
                 return self.close()
         except SSL.SSLError as e:
-            if e.args[0] == m2.ssl_error_want_read:
-              print "CHRIS WANTS READ"
-        # except ssl.SSLError as err:
-        #     if err.args[0] == ssl.SSL_ERROR_WANT_READ:
-              self._handshake_reading = True
-              return
-            elif e.args[0] == m2.ssl_error_want_write:
-                print "CHRIS WANTS WRITE"
-                self._handshake_writing = True
-                return
-            print "CHRIS EXCEPT"
+            print "CHRIS EXCEPT: %s" % str(e)
             raise
         except socket.error as err:
             # Some port scans (e.g. nmap in -sT mode) have been known
