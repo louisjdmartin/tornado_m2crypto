@@ -177,6 +177,7 @@ class M2IOStream(SSLIOStream):
             print "CHRIS EXCEPT: %s" % str(e)
             raise
         except socket.error as err:
+            print "Socket error!"
             # Some port scans (e.g. nmap in -sT mode) have been known
             # to cause do_handshake to raise EBADF and ENOTCONN, so make
             # those errors quiet as well.
@@ -195,8 +196,10 @@ class M2IOStream(SSLIOStream):
         else:
             self._ssl_accepting = False
             if not self._verify_cert(self.socket.get_peer_cert()):
+                print "VALIDATION FAILED!"
                 self.close()
                 return
+            print "Connect complete! (Sever: %s)!" % self.socket.server_side
             self._run_ssl_connect_callback()
 
     # CHRIS no need to change
@@ -254,7 +257,7 @@ class M2IOStream(SSLIOStream):
     @printDebug
     def _handle_connect(self):
         # Call the superclass method to check for errors.
-        IOStream._handle_connect(self)
+        self._handle_connect_super()
         if self.closed():
             return
         # When the connection is complete, wrap the socket for SSL
@@ -317,7 +320,13 @@ class M2IOStream(SSLIOStream):
     #@printDebug
     def write_to_fd(self, data):
         try:
-            return self.socket.send(data)
+            res = self.socket.send(data)
+            # TODO: Hmm, -1 sometimes means try again,
+            #       this is a case where working out how to use
+            #       SSL_WANT_WRITE is going to be needed...
+            if res < 0:
+                return 0
+            return res
         finally:
             # Avoid keeping to data, which can be a memoryview.
             # See https://github.com/tornadoweb/tornado/pull/2008
@@ -333,6 +342,15 @@ class M2IOStream(SSLIOStream):
                 return None
             try:
                 return self.socket.recv_into(buf)
+            except TypeError:
+                # Bug in M2Crypto?
+                # TODO: This shouldn't use an exception path
+                #       Either Connection should be subclassed with a working
+                #       implementation of recv_into, or work out why it
+                #       sometimes gets a None returned anyway, it's probably
+                #       a race between the handshake and the first read?
+                print "Nothing to read?"
+                return None
             except SSL.SSLError as e:
                 if e.args[0] == m2.ssl_error_want_read:
                     return None
@@ -350,3 +368,29 @@ class M2IOStream(SSLIOStream):
     #@printDebug
     def _is_connreset(self, e):
       return IOStream._is_connreset(self, e)
+
+    def _handle_connect_super(self):
+        # Work around a bug where M2Crypto passes None as last argument to
+        # getsockopt, but an int is required.
+        err = self.socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR, 0)
+        if err != 0:
+            self.error = socket.error(err, os.strerror(err))
+            # IOLoop implementations may vary: some of them return
+            # an error state before the socket becomes writable, so
+            # in that case a connection failure would be handled by the
+            # error path in _handle_events instead of here.
+            if self._connect_future is None:
+                gen_log.warning("Connect error on fd %s: %s",
+                                self.socket.fileno(), errno.errorcode[err])
+            print "Close connect error!"
+            self.close()
+            return
+        if self._connect_callback is not None:
+            callback = self._connect_callback
+            self._connect_callback = None
+            self._run_callback(callback)
+        if self._connect_future is not None:
+            future = self._connect_future
+            self._connect_future = None
+            future.set_result(self)
+        self._connecting = False
