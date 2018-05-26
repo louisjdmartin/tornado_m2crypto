@@ -9,7 +9,7 @@ from tornado.concurrent import Future
 from tornado.iostream import SSLIOStream, _ERRNO_WOULDBLOCK,IOStream
 from tornado.log import gen_log
 
-from M2Crypto import m2, SSL
+from M2Crypto import m2, SSL, Err
 from myDebug import printDebug
 
 
@@ -43,7 +43,6 @@ class M2IOStream(SSLIOStream):
         for `ssl.wrap_socket`
         """
         self._ssl_options = kwargs.pop('ssl_options', _client_m2_ssl_defaults)
-        self._asServer = self._ssl_options.get('asServer', False)
         IOStream.__init__(self, *args, **kwargs)
         self._ssl_accepting = True
         self._handshake_reading = False
@@ -147,14 +146,22 @@ class M2IOStream(SSLIOStream):
         try:
             self._handshake_reading = False
             self._handshake_writing = False
-            print "CHRIS DOING HANDSHAKE %s"%self._asServer
+            print "CHRIS DOING HANDSHAKE %s"%self.socket.server_side
             self.socket.setup_ssl()
-            if self._asServer:
+            self.socket.setblocking(1)
+            if self.socket.server_side:
+              self.socket.set_accept_state()
               res = self.socket.accept_ssl()
             else:
               self.socket.set_connect_state()
               res = self.socket.connect_ssl()
+            self.socket.setblocking(0) # Hack, should set it back to previous state...
             print "Chris accept_ssl ok %s"%res
+            err_num = self.socket.ssl_get_error(res)
+            if res <= 0:
+                print "Err: %s" % err_num
+                print "Err Str: %s" % Err.get_error_reason(err_num)
+                return self.close()
         except SSL.SSLError as e:
             if e.args[0] == m2.ssl_error_want_read:
               print "CHRIS WANTS READ"
