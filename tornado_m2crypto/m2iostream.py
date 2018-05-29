@@ -9,7 +9,7 @@ from tornado.concurrent import Future
 from tornado.iostream import SSLIOStream, _ERRNO_WOULDBLOCK,IOStream
 from tornado.log import gen_log
 
-from M2Crypto import m2, SSL
+from M2Crypto import m2, SSL, Err
 from myDebug import printDebug
 
 
@@ -43,8 +43,8 @@ class M2IOStream(SSLIOStream):
         for `ssl.wrap_socket`
         """
         self._ssl_options = kwargs.pop('ssl_options', _client_m2_ssl_defaults)
-        self._asServer = self._ssl_options.get('asServer', False)
         IOStream.__init__(self, *args, **kwargs)
+        self._done_setup = False
         self._ssl_accepting = True
         self._handshake_reading = False
         self._handshake_writing = False
@@ -138,37 +138,46 @@ class M2IOStream(SSLIOStream):
     @printDebug
     def _do_ssl_handshake(self):
         # Based on code from test_ssl.py in the python stdlib
-        import traceback
-
-        print "CHRIS TRACEBACK"
-        for line in traceback.format_stack():
-          print(line.strip())
-        print "====="
+        #import traceback
+        #print "CHRIS TRACEBACK"
+        #for line in traceback.format_stack():
+        #  print(line.strip())
+        #print "====="
+        print ">> SOCKET TYPE: %s" % type(self.socket)
         try:
             self._handshake_reading = False
             self._handshake_writing = False
-            print "CHRIS DOING HANDSHAKE %s"%self._asServer
-            self.socket.setup_ssl()
-            if self._asServer:
+            print "CHRIS DOING HANDSHAKE %s"%self.socket.server_side
+            if not self._done_setup:
+                self.socket.setup_ssl()
+                if self.socket.server_side:
+                    self.socket.set_accept_state()
+                else:
+                    self.socket.set_connect_state()
+                self._done_setup = True
+            # Actual accept/connect logic
+            if self.socket.server_side:
               res = self.socket.accept_ssl()
             else:
-              self.socket.set_connect_state()
               res = self.socket.connect_ssl()
             print "Chris accept_ssl ok %s"%res
-        except SSL.SSLError as e:
-            if e.args[0] == m2.ssl_error_want_read:
-              print "CHRIS WANTS READ"
-        # except ssl.SSLError as err:
-        #     if err.args[0] == ssl.SSL_ERROR_WANT_READ:
-              self._handshake_reading = True
-              return
-            elif e.args[0] == m2.ssl_error_want_write:
-                print "CHRIS WANTS WRITE"
+            if res == 0:
+                # TODO: We should somehow get SSL_WANT_READ/WRITE here
+                #       and then set the correct flag, although it does
+                #       work as long as one of them gets set
+                self._handshake_reading = True
                 self._handshake_writing = True
                 return
-            print "CHRIS EXCEPT"
+            if res < 0:
+                err_num = self.socket.ssl_get_error(res)
+                print "Err: %s" % err_num
+                print "Err Str: %s" % Err.get_error_reason(err_num)
+                return self.close()
+        except SSL.SSLError as e:
+            print "CHRIS EXCEPT: %s" % str(e)
             raise
         except socket.error as err:
+            print "Socket error!"
             # Some port scans (e.g. nmap in -sT mode) have been known
             # to cause do_handshake to raise EBADF and ENOTCONN, so make
             # those errors quiet as well.
@@ -187,8 +196,10 @@ class M2IOStream(SSLIOStream):
         else:
             self._ssl_accepting = False
             if not self._verify_cert(self.socket.get_peer_cert()):
+                print "VALIDATION FAILED!"
                 self.close()
                 return
+            print "Connect complete! (Sever: %s)!" % self.socket.server_side
             self._run_ssl_connect_callback()
 
     # CHRIS no need to change
@@ -246,7 +257,7 @@ class M2IOStream(SSLIOStream):
     @printDebug
     def _handle_connect(self):
         # Call the superclass method to check for errors.
-        IOStream._handle_connect(self)
+        self._handle_connect_super()
         if self.closed():
             return
         # When the connection is complete, wrap the socket for SSL
@@ -309,7 +320,13 @@ class M2IOStream(SSLIOStream):
     #@printDebug
     def write_to_fd(self, data):
         try:
-            return self.socket.send(data)
+            res = self.socket.send(data)
+            # TODO: Hmm, -1 sometimes means try again,
+            #       this is a case where working out how to use
+            #       SSL_WANT_WRITE is going to be needed...
+            if res < 0:
+                return 0
+            return res
         finally:
             # Avoid keeping to data, which can be a memoryview.
             # See https://github.com/tornadoweb/tornado/pull/2008
@@ -325,6 +342,15 @@ class M2IOStream(SSLIOStream):
                 return None
             try:
                 return self.socket.recv_into(buf)
+            except TypeError:
+                # Bug in M2Crypto?
+                # TODO: This shouldn't use an exception path
+                #       Either Connection should be subclassed with a working
+                #       implementation of recv_into, or work out why it
+                #       sometimes gets a None returned anyway, it's probably
+                #       a race between the handshake and the first read?
+                print "Nothing to read?"
+                return None
             except SSL.SSLError as e:
                 if e.args[0] == m2.ssl_error_want_read:
                     return None
@@ -342,3 +368,29 @@ class M2IOStream(SSLIOStream):
     #@printDebug
     def _is_connreset(self, e):
       return IOStream._is_connreset(self, e)
+
+    def _handle_connect_super(self):
+        # Work around a bug where M2Crypto passes None as last argument to
+        # getsockopt, but an int is required.
+        err = self.socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR, 0)
+        if err != 0:
+            self.error = socket.error(err, os.strerror(err))
+            # IOLoop implementations may vary: some of them return
+            # an error state before the socket becomes writable, so
+            # in that case a connection failure would be handled by the
+            # error path in _handle_events instead of here.
+            if self._connect_future is None:
+                gen_log.warning("Connect error on fd %s: %s",
+                                self.socket.fileno(), errno.errorcode[err])
+            print "Close connect error!"
+            self.close()
+            return
+        if self._connect_callback is not None:
+            callback = self._connect_callback
+            self._connect_callback = None
+            self._run_callback(callback)
+        if self._connect_future is not None:
+            future = self._connect_future
+            self._connect_future = None
+            future.set_result(self)
+        self._connecting = False

@@ -4,7 +4,7 @@ from myDebug import printDebug
 # These are the keyword arguments to ssl.wrap_socket that must be translated
 # to their SSLContext equivalents (the other arguments are still passed
 # to SSLContext.wrap_socket).
-_SSL_CONTEXT_KEYWORDS = frozenset(['ssl_version', 'certfile', 'keyfile',
+_SSL_CONTEXT_KEYWORDS = frozenset(['ssl_version', 'certfile', 'keyfile', 'dhparam',
                                    'cert_reqs', 'verify_depth', 'ca_certs', 'ciphers'])
 
 @printDebug
@@ -72,6 +72,8 @@ def ssl_options_to_m2_context(ssl_options):
         print "ALL OK"
     if 'ciphers' in ssl_options:
         context.set_cipher_list(ssl_options['ciphers'])
+    if 'dhparam' in ssl_options:
+        context.set_tmp_dh(ssl_options['dhparam'])
     # if hasattr(ssl, 'OP_NO_COMPRESSION'):
     #     # Disable TLS compression to avoid CRIME and related attacks.
     #     # This constant depends on openssl version 1.0.
@@ -96,5 +98,12 @@ def m2_wrap_socket(socket, ssl_options, server_hostname=None, **kwargs):
 
     # if server_hostname:
     #   connection.set_tlsext_host_name(server_hostname)
+
+    if 'server_side' in kwargs:
+        connection.server_side = kwargs['server_side']
+    else:
+        connection.server_side = False
+
+    connection.family = socket.family
 
     return connection
