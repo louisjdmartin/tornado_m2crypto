@@ -1,4 +1,4 @@
-from M2Crypto import SSL
+from M2Crypto import SSL, m2
 from myDebug import printDebug
 
 # These are the keyword arguments to ssl.wrap_socket that must be translated
@@ -55,7 +55,7 @@ def ssl_options_to_m2_context(ssl_options):
     # set a session name.. not sure ..
     context.set_session_id_ctx('m2_srv')
     # Log the SSL info
-    context.set_info_callback()
+    # context.set_info_callback()
 
     if 'certfile' in ssl_options:
         context.load_cert(certfile=ssl_options['certfile'],keyfile = ssl_options.get('keyfile', None))
@@ -66,10 +66,8 @@ def ssl_options_to_m2_context(ssl_options):
     else:
       context.set_verify(SSL.verify_none, 10)
     if 'ca_certs' in ssl_options:
-        print "CHRIS I load the CA"
         if not context.load_verify_locations(ssl_options['ca_certs']):
           raise Exception('CA certificates not loaded')
-        print "ALL OK"
     if 'ciphers' in ssl_options:
         context.set_cipher_list(ssl_options['ciphers'])
     if 'dhparam' in ssl_options:
@@ -80,6 +78,9 @@ def ssl_options_to_m2_context(ssl_options):
     #     # TODO: Do we need to do this ourselves or can we trust
     #     # the defaults?
     #     context.options |= ssl.OP_NO_COMPRESSION
+
+
+
     return context
 
 
@@ -105,5 +106,12 @@ def m2_wrap_socket(socket, ssl_options, server_hostname=None, **kwargs):
         connection.server_side = False
 
     connection.family = socket.family
+
+    # CHRIS TEST
+    # Need this for writes that are larger than BIO pair buffers
+    # the ssl module does not set that one
+    # m2.ssl_set_mode( connection.ssl, m2.SSL_MODE_ENABLE_PARTIAL_WRITE )
+    m2.ssl_set_mode(connection.ssl, m2.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER)
+
 
     return connection

@@ -1,4 +1,5 @@
 import errno
+import os
 import socket
 import warnings
 
@@ -11,6 +12,8 @@ from tornado.log import gen_log
 
 from M2Crypto import m2, SSL, Err
 from myDebug import printDebug
+
+
 
 
 _client_m2_ssl_defaults = SSL.Context(weak_crypto = True)
@@ -54,7 +57,6 @@ class M2IOStream(SSLIOStream):
         # If the socket is already connected, attempt to start the handshake.
         try:
             n = self.socket.getpeername()
-            print "CHRIS peer name %s"%(n,)
         except socket.error:
             pass
         else:
@@ -147,7 +149,6 @@ class M2IOStream(SSLIOStream):
         try:
             self._handshake_reading = False
             self._handshake_writing = False
-            print "CHRIS DOING HANDSHAKE %s"%self.socket.server_side
             if not self._done_setup:
                 self.socket.setup_ssl()
                 if self.socket.server_side:
@@ -160,13 +161,12 @@ class M2IOStream(SSLIOStream):
               res = self.socket.accept_ssl()
             else:
               res = self.socket.connect_ssl()
-            print "Chris accept_ssl ok %s"%res
             if res == 0:
                 # TODO: We should somehow get SSL_WANT_READ/WRITE here
                 #       and then set the correct flag, although it does
                 #       work as long as one of them gets set
                 self._handshake_reading = True
-                self._handshake_writing = True
+                #self._handshake_writing = True
                 return
             if res < 0:
                 err_num = self.socket.ssl_get_error(res)
@@ -174,7 +174,6 @@ class M2IOStream(SSLIOStream):
                 print "Err Str: %s" % Err.get_error_reason(err_num)
                 return self.close()
         except SSL.SSLError as e:
-            print "CHRIS EXCEPT: %s" % str(e)
             raise
         except socket.error as err:
             print "Socket error!"
@@ -190,8 +189,6 @@ class M2IOStream(SSLIOStream):
             # On Linux, if the connection was reset before the call to
             # wrap_socket, do_handshake will fail with an
             # AttributeError.
-            print "CHRIS AtTR %s"%err
-
             return self.close(exc_info=err)
         else:
             self._ssl_accepting = False
@@ -319,13 +316,35 @@ class M2IOStream(SSLIOStream):
     #
     #@printDebug
     def write_to_fd(self, data):
+        #if 'UU' in data:
+
         try:
             res = self.socket.send(data)
             # TODO: Hmm, -1 sometimes means try again,
             #       this is a case where working out how to use
             #       SSL_WANT_WRITE is going to be needed...
             if res < 0:
-                return 0
+
+              err = self.socket.ssl_get_error( res)
+              if err == SSL.m2.ssl_error_want_write:
+                  return 0
+
+              # Now this is is clearly not correct.
+              # We get error "1 (ssl_error_ssl)" but the calling function (_handle_write)
+              # is handling exception. So we might have to throw instead
+              # of returning 0
+              # print "CHRIS ALL ERRORS"
+              # for e in dir(SSL.m2):
+              #   if 'ssl_error' in e:
+              #     print "%s -> %s"%(e, getattr(SSL.m2,e))
+              # -1 means try again, so let's do it..
+              if res == -1:
+                #return 0
+                raise socket.error(errno.EWOULDBLOCK, "Fix me please")
+              raise Exception()
+
+            #if res < 0:
+            #    return 0
             return res
         finally:
             # Avoid keeping to data, which can be a memoryview.
@@ -341,27 +360,39 @@ class M2IOStream(SSLIOStream):
                 # depending on the SSL version)
                 return None
             try:
-                return self.socket.recv_into(buf)
-            except TypeError:
+                print("CHRIS read_from_fd trying recv")
+                retRcv =  self.socket.recv_into(buf)
+                print("CHRIS read_from_fd retRcv %s"%retRcv)
+                return retRcv
+            except TypeError as e:
                 # Bug in M2Crypto?
                 # TODO: This shouldn't use an exception path
                 #       Either Connection should be subclassed with a working
                 #       implementation of recv_into, or work out why it
                 #       sometimes gets a None returned anyway, it's probably
                 #       a race between the handshake and the first read?
-                print "Nothing to read?"
+                print "Nothing to read? %s"%repr(e)
+
                 return None
             except SSL.SSLError as e:
+                print "CHRIS READ ERROR %s %s"%(type(e), repr(e))
                 if e.args[0] == m2.ssl_error_want_read:
+                    print("CHRIS read_from_fd want read")
                     return None
                 else:
+                    print("CHRIS read_from_fd raise")
+
                     raise
             except socket.error as e:
+                print("CHRIS socker.error")
                 if e.args[0] in _ERRNO_WOULDBLOCK:
+                    print("CHRIS would block")
                     return None
                 else:
+                    print("CHRIS raise")
                     raise
         finally:
+            print("CHRIS fd finally")
             buf = None
     #
     # Do inherit because there is no such error in M2Crpto

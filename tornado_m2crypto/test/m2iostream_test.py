@@ -26,6 +26,7 @@ import socket
 from M2Crypto import SSL
 
 
+
 import sys
 
 try:
@@ -452,7 +453,8 @@ class TestReadWriteMixin(object):
                     "pypy gc causes problems with openssl")
             NUM_KB = 4096
             for i in range(NUM_KB):
-                ws.write(b"A" * 1024)
+                ws.write(b"U" * 1024)
+
             ws.write(b"\r\n")
             data = yield rs.read_until(b"\r\n")
             self.assertEqual(len(data), NUM_KB * 1024 + 2)
@@ -713,6 +715,7 @@ class TestReadWriteMixin(object):
             # The rs pauses while reading.
             yield rs.read_bytes(MB)
             yield gen.sleep(0.1)
+
             # The ws's writes have been blocked; the rs can
             # continue to read gradually.
             for i in range(9):
@@ -785,7 +788,12 @@ class TestReadWriteMixin(object):
             # Existing buffer can satisfy read immediately
             data = yield rs.read_into(buf, partial=True)
             self.assertEqual(data, 6)
-            self.assertEqual(bytes(buf), b"5678901234")
+            #
+            # see documentation of SSL.Connection.recv_into
+            # The rest of the memoryview is filled with NULL
+            # (The python ssl keeps what was there before)
+            #self.assertEqual(bytes(buf), b"5678901234")
+            self.assertEqual(bytes(buf), b"567890\x00\x00\x00\x00")
 
         finally:
             ws.close()
@@ -971,7 +979,10 @@ class TestIOStreamMixin(TestReadWriteMixin):
         server, client = yield self.make_iostream_pair()
         try:
             os.close(server.socket.fileno())
-            with self.assertRaises(socket.error):
+            #with self.assertRaises(socket.error):
+            # ssl.SSLError inherits from socket.error, but M2Crypto.SSL.SSLError does not
+            # So I might even have to overwrite some of the IOStream methods because of that...
+            with self.assertRaises(SSL.SSLError):
                 server.read_bytes(1)
         finally:
             server.close()

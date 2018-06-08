@@ -10,5 +10,7 @@ tornado_m2crypto.egg-info/dependency_links.txt
 tornado_m2crypto.egg-info/requires.txt
 tornado_m2crypto.egg-info/top_level.txt
 tornado_m2crypto/test/__init__.py
+tornado_m2crypto/test/m2io_https.py
 tornado_m2crypto/test/m2iostream_test.py
+tornado_m2crypto/test/runOldtests.py
 tornado_m2crypto/test/runtests.py
