@@ -1,22 +1,101 @@
+"""
+This module is meant to replace the standard SSLIOStream from Tornado, and to use M2Crypto instead of ssl.
+
+In order to use it, just add the following at the beginning of your server
+
+```
+
+  # Patching
+  # You need it because TCPServer calls directly ssl_wrap_socket
+  from tornado_m2crypto.m2netutil import m2_wrap_socket
+  import tornado.netutil
+  tornado.netutil.ssl_wrap_socket = m2_wrap_socket
+
+  # Set dynamically the IOStream you want
+  import tornado.iostream
+  tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
+```
+
+A complete example would be
+
+```
+  SSL_OPTS = {
+
+    'certfile': 'hostcert.pem',
+    'keyfile': 'hostkey.pem',
+    'cert_reqs': M2Crypto.SSL.verify_peer,
+    'ca_certs': 'ca.cert.pem',
+  }
+
+  # Patching
+  # You need it because TCPServer calls directly ssl_wrap_socket
+  from tornado_m2crypto.m2netutil import m2_wrap_socket
+  import tornado.netutil
+  tornado.netutil.ssl_wrap_socket = m2_wrap_socket
+
+  # Set dynamically the IOStream you want
+  import tornado.iostream
+  tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
+
+
+  # From now on, it is completely standard tornado https server
+
+  import tornado.httpserver
+  import tornado.ioloop
+  import tornado.web
+
+
+  class getToken(tornado.web.RequestHandler):
+      def get(self):
+          print self.request.connection.stream.socket.get_peer_cert().as_text()
+          self.write("hello\n\n")
+
+  application = tornado.web.Application([
+      (r'/', getToken),
+  ])
+
+  if __name__ == '__main__':
+      http_server = tornado.httpserver.HTTPServer(application, ssl_options=SSL_OPTS)
+      http_server.listen(12345)
+      tornado.ioloop.IOLoop.instance().start()
+```
+
+
+Note that to get the peer certificate, you need to use `self.request.connection.stream.socket.get_peer_cert()`
+
+The supported SSL options are all described in `~m2netutil.ssl_options_to_m2_context`.
+
+WARNING:
+Until my MR/PR are accepted, please use
+
+Tornado: git+https://github.com/chaen/tornado.git@iostreamConfigurable
+M2Crypto: git+https://gitlab.com/chaen/m2crypto@tmpUntilSwigUpdated
+
+TODO: in the iostream._read_to_buffer, we only catch socket.error. This works because
+      ssl.SSLError inherits from socket.error, but not M2Crypto.SSL.SSLError, so one might
+      need to overwrite that here
+
+TODO: the _verify_cert is for the time being always returning True
+
+
+"""
+
 import errno
 import os
 import socket
-import warnings
 
-from .netutil import m2_wrap_socket
+from tornado_m2crypto.m2netutil import m2_wrap_socket
 
-from tornado import stack_context
-from tornado.concurrent import Future
 from tornado.iostream import SSLIOStream, _ERRNO_WOULDBLOCK,IOStream
 from tornado.log import gen_log
 
 from M2Crypto import m2, SSL, Err
-from myDebug import printDebug
 
 
 
 
 _client_m2_ssl_defaults = SSL.Context(weak_crypto = True)
+# Do I need to add the pruposes ?
 # _client_m2_ssl_defaults.set_options(m2.X509_PURPOSE_SSL_CLIENT)
 
 _server_m2_ssl_defaults = SSL.Context(weak_crypto = True)
@@ -39,11 +118,9 @@ class M2IOStream(SSLIOStream):
     def __init__(self, *args, **kwargs):
       pass
 
-    #@printDebug
     def initialize(self, *args, **kwargs):
         """The ``ssl_options`` keyword argument may either be an
-        `SSL.SSLContext` object or a dictionary of keywords arguments
-        for `ssl.wrap_socket`
+        `~M2Crypto.SSL.SSLContext` object or a dictionary of keywords arguments (see `~m2netutil.ssl_options_to_m2_context`.)
         """
         self._ssl_options = kwargs.pop('ssl_options', _client_m2_ssl_defaults)
         IOStream.__init__(self, *args, **kwargs)
@@ -66,91 +143,14 @@ class M2IOStream(SSLIOStream):
             self._add_io_state(self.io_loop.WRITE)
 
 
-    # CHRIS: NO NEED TO INHERIT
-    # @classmethod
-    # def configurable_base(cls):
-    #     return SSLIOStream
-    #
-    # CHRIS: NO NEED TO INHERIT
-    # @classmethod
-    # def configurable_default(cls):
-    #     return SSLIOStream
-    #
-    #
-    # CHRIS: NO NEED TO INHERIT
-    # def reading(self):
-    #     return self._handshake_reading or super(SSLIOStream, self).reading()
-    #
-    # CHRIS: NO NEED TO INHERIT
-    # def writing(self):
-    #     return self._handshake_writing or super(SSLIOStream, self).writing()
-    #
-
-    # def _do_ssl_handshake(self):
-    #     # Based on code from test_ssl.py in the python stdlib
-    #     try:
-    #         self._handshake_reading = False
-    #         self._handshake_writing = False
-    #         setup_ssl
-    #         ret = self.socket.accept_ssl()
-    #         if ret < 0:
-    #           get_error
-    #     except ssl.SSLError as err:
-    #         if err.args[0] == ssl.SSL_ERROR_WANT_READ:
-    #             self._handshake_reading = True
-    #             return
-    #         elif err.args[0] == ssl.SSL_ERROR_WANT_WRITE:
-    #             self._handshake_writing = True
-    #             return
-    #         elif err.args[0] in (ssl.SSL_ERROR_EOF,
-    #                              ssl.SSL_ERROR_ZERO_RETURN):
-    #             return self.close(exc_info=err)
-    #         elif err.args[0] == ssl.SSL_ERROR_SSL:
-    #             try:
-    #                 peer = self.socket.getpeername()
-    #             except Exception:
-    #                 peer = '(not connected)'
-    #             gen_log.warning("SSL Error on %s %s: %s",
-    #                             self.socket.fileno(), peer, err)
-    #             return self.close(exc_info=err)
-    #         raise
-    #     except socket.error as err:
-    #         # Some port scans (e.g. nmap in -sT mode) have been known
-    #         # to cause do_handshake to raise EBADF and ENOTCONN, so make
-    #         # those errors quiet as well.
-    #         # https://groups.google.com/forum/?fromgroups#!topic/python-tornado/ApucKJat1_0
-    #         if (self._is_connreset(err) or
-    #                 err.args[0] in (errno.EBADF, errno.ENOTCONN)):
-    #             return self.close(exc_info=err)
-    #         raise
-    #     except AttributeError as err:
-    #         # On Linux, if the connection was reset before the call to
-    #         # wrap_socket, do_handshake will fail with an
-    #         # AttributeError.
-    #         return self.close(exc_info=err)
-    #     else:
-    #         self._ssl_accepting = False
-    #         if not self._verify_cert(self.socket.getpeercert()):
-    #             self.close()
-    #             return
-    #         self._run_ssl_connect_callback()
-
-
-    # CHRIS missing a hell lot of error handling
-    @printDebug
     def _do_ssl_handshake(self):
-        # Based on code from test_ssl.py in the python stdlib
-        #import traceback
-        #print "CHRIS TRACEBACK"
-        #for line in traceback.format_stack():
-        #  print(line.strip())
-        #print "====="
-        print ">> SOCKET TYPE: %s" % type(self.socket)
         try:
             self._handshake_reading = False
             self._handshake_writing = False
             if not self._done_setup:
                 self.socket.setup_ssl()
+                # This server_side was added when creating the Connection
+                # it is not a standard attribute
                 if self.socket.server_side:
                     self.socket.set_accept_state()
                 else:
@@ -199,18 +199,7 @@ class M2IOStream(SSLIOStream):
             print "Connect complete! (Sever: %s)!" % self.socket.server_side
             self._run_ssl_connect_callback()
 
-    # CHRIS no need to change
-    # def _run_ssl_connect_callback(self):
-    #     if self._ssl_connect_callback is not None:
-    #         callback = self._ssl_connect_callback
-    #         self._ssl_connect_callback = None
-    #         self._run_callback(callback)
-    #     if self._ssl_connect_future is not None:
-    #         future = self._ssl_connect_future
-    #         self._ssl_connect_future = None
-    #         future.set_result(self)
-    #
-    #@printDebug
+
     def _verify_cert(self, peercert):
         """Returns True if peercert is valid according to the configured
         validation mode and hostname.
@@ -218,40 +207,16 @@ class M2IOStream(SSLIOStream):
         The ssl handshake already tested the certificate for a valid
         CA signature; the only thing that remains is to check
         the hostname.
+
+
+        :warning: not used ! Always return true
         """
         return True
         checker = SSL.Checker.Checker()
-        if not checker(self.socket.get_peer_cert(), self.socket.addr[0]):
+        if not checker(self.socket.get_peer_cert(), self.socket.addr):
             return False
 
-    # CHRIS : no need
-    # def _handle_read(self):
-    #     if self._ssl_accepting:
-    #         self._do_ssl_handshake()
-    #         return
-    #     super(SSLIOStream, self)._handle_read()
-    #
-    # CHRIS : no need
-    # def _handle_write(self):
-    #     if self._ssl_accepting:
-    #         self._do_ssl_handshake()
-    #         return
-    #     super(SSLIOStream, self)._handle_write()
-    #
 
-    # CHRIS no need
-    # def connect(self, address, callback=None, server_hostname=None):
-    #     self._server_hostname = server_hostname
-    #     # Ignore the result of connect(). If it fails,
-    #     # wait_for_handshake will raise an error too. This is
-    #     # necessary for the old semantics of the connect callback
-    #     # (which takes no arguments). In 6.0 this can be refactored to
-    #     # be a regular coroutine.
-    #     fut = super(SSLIOStream, self).connect(address)
-    #     fut.add_done_callback(lambda f: f.exception())
-    #     return self.wait_for_handshake(callback)
-
-    @printDebug
     def _handle_connect(self):
         # Call the superclass method to check for errors.
         self._handle_connect_super()
@@ -274,58 +239,15 @@ class M2IOStream(SSLIOStream):
                                       server_hostname=self._server_hostname)
         self._add_io_state(old_state)
 
-    # CHRIS: no need to inherit
-    # def wait_for_handshake(self, callback=None):
-    #     """Wait for the initial SSL handshake to complete.
-    #
-    #     If a ``callback`` is given, it will be called with no
-    #     arguments once the handshake is complete; otherwise this
-    #     method returns a `.Future` which will resolve to the
-    #     stream itself after the handshake is complete.
-    #
-    #     Once the handshake is complete, information such as
-    #     the peer's certificate and NPN/ALPN selections may be
-    #     accessed on ``self.socket``.
-    #
-    #     This method is intended for use on server-side streams
-    #     or after using `IOStream.start_tls`; it should not be used
-    #     with `IOStream.connect` (which already waits for the
-    #     handshake to complete). It may only be called once per stream.
-    #
-    #     .. versionadded:: 4.2
-    #
-    #     .. deprecated:: 5.1
-    #
-    #        The ``callback`` argument is deprecated and will be removed
-    #        in Tornado 6.0. Use the returned `.Future` instead.
-    #
-    #     """
-    #     if (self._ssl_connect_callback is not None or
-    #             self._ssl_connect_future is not None):
-    #         raise RuntimeError("Already waiting")
-    #     if callback is not None:
-    #         warnings.warn("callback argument is deprecated, use returned Future instead",
-    #                       DeprecationWarning)
-    #         self._ssl_connect_callback = stack_context.wrap(callback)
-    #         future = None
-    #     else:
-    #         future = self._ssl_connect_future = Future()
-    #     if not self._ssl_accepting:
-    #         self._run_ssl_connect_callback()
-    #     return future
-    #
-    #@printDebug
+
     def write_to_fd(self, data):
-        #if 'UU' in data:
 
         try:
             res = self.socket.send(data)
-            # TODO: Hmm, -1 sometimes means try again,
-            #       this is a case where working out how to use
-            #       SSL_WANT_WRITE is going to be needed...
             if res < 0:
 
               err = self.socket.ssl_get_error( res)
+              # if the error is try again, let's do it !
               if err == SSL.m2.ssl_error_want_write:
                   return 0
 
@@ -333,25 +255,17 @@ class M2IOStream(SSLIOStream):
               # We get error "1 (ssl_error_ssl)" but the calling function (_handle_write)
               # is handling exception. So we might have to throw instead
               # of returning 0
-              # print "CHRIS ALL ERRORS"
-              # for e in dir(SSL.m2):
-              #   if 'ssl_error' in e:
-              #     print "%s -> %s"%(e, getattr(SSL.m2,e))
-              # -1 means try again, so let's do it..
               if res == -1:
                 #return 0
                 raise socket.error(errno.EWOULDBLOCK, "Fix me please")
               raise Exception()
 
-            #if res < 0:
-            #    return 0
             return res
         finally:
             # Avoid keeping to data, which can be a memoryview.
             # See https://github.com/tornadoweb/tornado/pull/2008
             del data
 
-    # @printDebug
     def read_from_fd(self, buf):
         try:
             if self._ssl_accepting:
@@ -360,10 +274,7 @@ class M2IOStream(SSLIOStream):
                 # depending on the SSL version)
                 return None
             try:
-                print("CHRIS read_from_fd trying recv")
-                retRcv =  self.socket.recv_into(buf)
-                print("CHRIS read_from_fd retRcv %s"%retRcv)
-                return retRcv
+                return self.socket.recv_into(buf)
             except TypeError as e:
                 # Bug in M2Crypto?
                 # TODO: This shouldn't use an exception path
@@ -371,32 +282,24 @@ class M2IOStream(SSLIOStream):
                 #       implementation of recv_into, or work out why it
                 #       sometimes gets a None returned anyway, it's probably
                 #       a race between the handshake and the first read?
-                print "Nothing to read? %s"%repr(e)
+                #print "Nothing to read? %s"%repr(e)
 
                 return None
             except SSL.SSLError as e:
-                print "CHRIS READ ERROR %s %s"%(type(e), repr(e))
                 if e.args[0] == m2.ssl_error_want_read:
-                    print("CHRIS read_from_fd want read")
                     return None
                 else:
-                    print("CHRIS read_from_fd raise")
 
                     raise
             except socket.error as e:
-                print("CHRIS socker.error")
                 if e.args[0] in _ERRNO_WOULDBLOCK:
-                    print("CHRIS would block")
                     return None
                 else:
-                    print("CHRIS raise")
                     raise
         finally:
-            print("CHRIS fd finally")
             buf = None
-    #
+
     # Do inherit because there is no such error in M2Crpto
-    #@printDebug
     def _is_connreset(self, e):
       return IOStream._is_connreset(self, e)
 

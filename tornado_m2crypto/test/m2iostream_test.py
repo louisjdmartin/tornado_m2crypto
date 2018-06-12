@@ -4,7 +4,7 @@ from tornado import gen
 from tornado import netutil
 from tornado.iostream import IOStream, PipeIOStream, StreamClosedError, _StreamBuffer,SSLIOStream
 from tornado_m2crypto.m2iostream import M2IOStream
-from tornado_m2crypto.netutil import m2_wrap_socket
+from tornado_m2crypto.m2netutil import m2_wrap_socket
 from tornado.httputil import HTTPHeaders
 from tornado.locks import Condition, Event
 from tornado.log import gen_log, app_log

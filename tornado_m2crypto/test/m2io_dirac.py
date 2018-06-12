@@ -1,0 +1,70 @@
+#!/usr/bin/env python
+# Simple HTTPS test server
+# Run with: tox -e m2io_https
+# Client: curl -k -v https://localhost:12345
+
+import M2Crypto
+from M2Crypto import X509
+
+CERTDIR = '/home/chaen/dirac/tornadoM2Crypto/test_tornado_m2crypto/certs/'
+SSL_OPTS = {
+  'certfile': '/tmp/hostcert/hostcert.pem',
+  'keyfile':'/tmp/hostcert/hostkey.pem',
+  'cert_reqs': M2Crypto.SSL.verify_peer,
+  'ca_certs': '/tmp/grid-security/allCAs.pem'
+}
+
+# Patching
+from tornado_m2crypto.m2netutil import m2_wrap_socket
+import tornado.netutil
+tornado.netutil.ssl_wrap_socket = m2_wrap_socket
+
+import tornado.iostream
+tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
+
+
+
+import tornado.httpserver
+import tornado.ioloop
+import tornado.web
+
+######### DIRAC TESTS #########################################################################################
+from DIRAC.Core.Security.X509Chain import X509Chain
+from DIRAC.Core.Security.X509Certificate import X509Certificate
+from DIRAC.Core.Security.ProxyInfo import getProxyInfo
+
+# To get this to work, Core/Security/__init__.py has to be modified not to register the two VOMS OID
+
+
+##############################################################################################################
+
+class getToken(tornado.web.RequestHandler):
+    def get(self):
+        # pemCert = self.request.connection.stream.socket.get_peer_cert().as_pem() #False =  dictionnaire, True=Binaire
+        # print "CERT !! %s"%pemCert
+        # diracCert = X509Certificate()
+        # print "LOADING %s"%diracCert.loadFromString(pemCert)
+        # print "DIRAC CERT !! %s"%diracCert.getSubjectDN()
+        chainAsText = ""
+        diracChain = X509Chain()
+        cert_chain = self.request.connection.stream.socket.get_peer_cert_chain()
+        print "CERT CHAIN !!"
+        for cert in cert_chain:
+          # diracCert = X509Certificate()
+          # diracCert.loadFromString(cert.as_pem())
+          # diracCertList.append(diracCert)
+          chainAsText += cert.as_pem()
+          print "one more %s"%cert.get_subject()
+        diracChain.loadChainFromString(chainAsText)
+        from pprint import pprint
+        pprint(getProxyInfo(diracChain)['Value'])
+        self.write("hello\n\n")
+
+application = tornado.web.Application([
+    (r'/', getToken),
+])
+
+if __name__ == '__main__':
+    http_server = tornado.httpserver.HTTPServer(application, ssl_options=SSL_OPTS)
+    http_server.listen(12345)
+    tornado.ioloop.IOLoop.instance().start()
