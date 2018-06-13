@@ -69,7 +69,7 @@ WARNING:
 Until my MR/PR are accepted, please use
 
 Tornado: git+https://github.com/chaen/tornado.git@iostreamConfigurable
-M2Crypto: git+https://gitlab.com/chaen/m2crypto@tmpUntilSwigUpdated
+M2Crypto: git+https://gitlab.com/chaen/m2crypto.git@tmpUntilSwigUpdated
 
 TODO: in the iostream._read_to_buffer, we only catch socket.error. This works because
       ssl.SSLError inherits from socket.error, but not M2Crypto.SSL.SSLError, so one might

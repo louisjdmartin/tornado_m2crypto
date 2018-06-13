@@ -16,6 +16,15 @@ SSL_OPTS = {
   'ca_certs': CERTDIR + 'ca/ca.cert.pem',
 }
 
+#SSL_OPTS = {
+#
+#  'certfile': '/tmp/hostcert/hostcert.pem',
+#  'keyfile': '/tmp/hostcert/hostkey.pem',
+#  'cert_reqs': M2Crypto.SSL.verify_peer,
+#  'ca_certs': '/tmp/grid-security/allCAs.pem',
+#  'sslDebug' : True
+#}
+
 # Patching
 # You need it because TCPServer calls directly ssl_wrap_socket
 from tornado_m2crypto.m2netutil import m2_wrap_socket
@@ -34,7 +43,11 @@ import tornado.web
 
 class getToken(tornado.web.RequestHandler):
     def get(self):
-        #print self.request.connection.stream.socket.get_peer_cert().as_text() #False =  dictionnaire, True=Binaire
+        print self.request.connection.stream.socket.get_peer_cert().as_text() #False =  dictionnaire, True=Binaire
+        print "CHRIS %s"%len(self.request.connection.stream.socket.get_peer_cert_chain())
+        for c in self.request.connection.stream.socket.get_peer_cert_chain():
+          print ('++++++++++++++++++++++')
+          print c.as_text()
         self.write("hello\n\n")
 
 application = tornado.web.Application([

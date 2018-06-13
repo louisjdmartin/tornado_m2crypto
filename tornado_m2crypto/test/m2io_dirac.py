@@ -3,16 +3,20 @@
 # Run with: tox -e m2io_https
 # Client: curl -k -v https://localhost:12345
 
+import os
 import M2Crypto
 from M2Crypto import X509
 
-CERTDIR = '/home/chaen/dirac/tornadoM2Crypto/test_tornado_m2crypto/certs/'
+#THIS WORKS AS TEST BUT NOT HERE WHY ????
+CERTDIR = os.path.join(os.path.dirname(__file__), 'certs/')
 SSL_OPTS = {
-  'certfile': '/tmp/hostcert/hostcert.pem',
-  'keyfile':'/tmp/hostcert/hostkey.pem',
+
+  'certfile': CERTDIR + 'MrBoincHost/hostcert.pem',
+  'keyfile': CERTDIR + 'MrBoincHost/hostkey.pem',
   'cert_reqs': M2Crypto.SSL.verify_peer,
-  'ca_certs': '/tmp/grid-security/allCAs.pem'
+  'ca_certs': CERTDIR + 'ca/ca.cert.pem',
 }
+
 
 # Patching
 from tornado_m2crypto.m2netutil import m2_wrap_socket
@@ -45,10 +49,10 @@ class getToken(tornado.web.RequestHandler):
         # diracCert = X509Certificate()
         # print "LOADING %s"%diracCert.loadFromString(pemCert)
         # print "DIRAC CERT !! %s"%diracCert.getSubjectDN()
-        chainAsText = ""
+        chainAsText =self.request.connection.stream.socket.get_peer_cert().as_pem()
+        print "First in the list %s"%chainAsText
         diracChain = X509Chain()
         cert_chain = self.request.connection.stream.socket.get_peer_cert_chain()
-        print "CERT CHAIN !!"
         for cert in cert_chain:
           # diracCert = X509Certificate()
           # diracCert.loadFromString(cert.as_pem())
@@ -56,8 +60,11 @@ class getToken(tornado.web.RequestHandler):
           chainAsText += cert.as_pem()
           print "one more %s"%cert.get_subject()
         diracChain.loadChainFromString(chainAsText)
+
         from pprint import pprint
-        pprint(getProxyInfo(diracChain)['Value'])
+        proxyInfo = getProxyInfo(diracChain)
+        if proxyInfo['OK']:
+          pprint(proxyInfo['Value'])
         self.write("hello\n\n")
 
 application = tornado.web.Application([
