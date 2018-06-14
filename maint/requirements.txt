@@ -1,6 +1,6 @@
 #m2crypto
-/home/chaen/dirac/tornadoM2Crypto/m2crypto/
-#git+https://gitlab.com/chaen/m2crypto@tmpUntilSwigUpdated
+#/home/chaen/dirac/tornadoM2Crypto/m2crypto/
+git+https://gitlab.com/chaen/m2crypto@tmpUntilSwigUpdated
 pytest
 mock
 #git+https://github.com/chaen/tornado.git@iostreamConfigurable

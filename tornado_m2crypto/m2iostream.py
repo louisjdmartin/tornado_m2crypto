@@ -37,6 +37,9 @@ A complete example would be
   import tornado.iostream
   tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
 
+  # Set dynamically the HTTPServerRequest to use M2Crypto
+  import tornado.httputil
+  tornado.httputil.HTTPServerRequest.configure('tornado_m2crypto.m2httputil.M2HTTPServerRequest')
 
   # From now on, it is completely standard tornado https server
 
@@ -47,7 +50,7 @@ A complete example would be
 
   class getToken(tornado.web.RequestHandler):
       def get(self):
-          print self.request.connection.stream.socket.get_peer_cert().as_text()
+          print self.request.get_ssl_certificate().as_text()
           self.write("hello\n\n")
 
   application = tornado.web.Application([

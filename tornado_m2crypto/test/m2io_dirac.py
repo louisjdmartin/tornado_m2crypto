@@ -26,6 +26,9 @@ tornado.netutil.ssl_wrap_socket = m2_wrap_socket
 import tornado.iostream
 tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
 
+import tornado.httputil
+tornado.httputil.HTTPServerRequest.configure('tornado_m2crypto.m2httputil.M2HTTPServerRequest')
+
 
 
 import tornado.httpserver
@@ -49,10 +52,10 @@ class getToken(tornado.web.RequestHandler):
         # diracCert = X509Certificate()
         # print "LOADING %s"%diracCert.loadFromString(pemCert)
         # print "DIRAC CERT !! %s"%diracCert.getSubjectDN()
-        chainAsText =self.request.connection.stream.socket.get_peer_cert().as_pem()
+        chainAsText =self.request.get_ssl_certificate().as_pem()
         print "First in the list %s"%chainAsText
         diracChain = X509Chain()
-        cert_chain = self.request.connection.stream.socket.get_peer_cert_chain()
+        cert_chain = self.request.get_ssl_certificate_chain()
         for cert in cert_chain:
           # diracCert = X509Certificate()
           # diracCert.loadFromString(cert.as_pem())

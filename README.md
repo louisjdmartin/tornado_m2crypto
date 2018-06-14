@@ -48,6 +48,11 @@ tornado.netutil.ssl_wrap_socket = m2_wrap_socket
 # Dynamically configurable
 import tornado.iostream
 tornado.iostream.SSLIOStream.configure('tornado_m2crypto.m2iostream.M2IOStream')
+
+
+import tornado.httputil
+tornado.httputil.HTTPServerRequest.configure('tornado_m2crypto.m2httputil.M2HTTPServerRequest')
+
 ```
 
 
