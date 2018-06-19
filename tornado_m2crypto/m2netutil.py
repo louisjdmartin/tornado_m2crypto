@@ -18,7 +18,7 @@ def ssl_options_to_m2_context(ssl_options):
     * cert_reqs: (default none) Requirements over the remote certificate
                   (verify_none, verify_peer, verify_fail_if_no_peer_cert or verify_client_once from `~M2Crypto.SSL`)
     * verify_depth: (default 10) recursion depth for certificate verification
-    * ca_certs: path to the CA file
+    * ca_certs: path to the CA file or the CA folder
     * ciphers: cipher list (see `~M2Crypto.SSL.Context.set_cipher_list`)
     * sslDebug: if True, will printout the openssl debug info
 
