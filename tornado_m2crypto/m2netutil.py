@@ -1,4 +1,5 @@
 from M2Crypto import SSL, m2
+from os.path import isdir
 
 
 _SSL_CONTEXT_KEYWORDS = frozenset(['ssl_version', 'certfile', 'keyfile', 'dhparam',
@@ -45,7 +46,11 @@ def ssl_options_to_m2_context(ssl_options):
       context.set_verify(SSL.verify_none, 10)
 
     if 'ca_certs' in ssl_options:
-        if not context.load_verify_locations(ssl_options['ca_certs']):
+        if isdir(ssl_options['ca_certs']):
+            load = context.load_verify_locations(capath=ssl_options['ca_certs'])
+        else:
+            load = context.load_verify_locations(cafile=ssl_options['ca_certs'])
+        if not load:
           raise Exception('CA certificates not loaded')
     if 'ciphers' in ssl_options:
         context.set_cipher_list(ssl_options['ciphers'])
